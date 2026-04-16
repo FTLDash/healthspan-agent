@@ -39,6 +39,33 @@ function formatCountdown(ms) {
   return `${m}m ${sec}s`;
 }
 
+async function callClaude(payload) {
+  const res = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+function extractJSON(text) {
+  const clean = text.replace(/```json|```/g, "").trim();
+  // Try direct parse first
+  try { return JSON.parse(clean); } catch {}
+  // Try finding JSON object
+  const start = clean.indexOf("{");
+  const end = clean.lastIndexOf("}");
+  if (start !== -1 && end !== -1) {
+    try { return JSON.parse(clean.slice(start, end + 1)); } catch {}
+  }
+  // Try extracting individual trend objects
+  const matches = [...clean.matchAll(/\{"headline"[^}]+\}/gs)];
+  const objects = matches.map(m => { try { return JSON.parse(m[0]); } catch { return null; } }).filter(Boolean);
+  if (objects.length > 0) return { trends: objects };
+  throw new Error("Could not parse JSON");
+}
+
 export default function HealthspanAgent() {
   const [email, setEmail]               = useState("");
   const [scheduleTime, setScheduleTime] = useState("08:00");
@@ -54,7 +81,6 @@ export default function HealthspanAgent() {
   const schedRef = useRef(null);
   const isRunning = status === STATUS.SEARCHING || status === STATUS.DRAFTING;
 
-  // Countdown ticker
   useEffect(() => {
     clearInterval(timerRef.current);
     if (!schedulerOn || !nextRun) { setCountdown(""); return; }
@@ -62,7 +88,6 @@ export default function HealthspanAgent() {
     return () => clearInterval(timerRef.current);
   }, [schedulerOn, nextRun]);
 
-  // Scheduler arm/disarm
   useEffect(() => {
     clearTimeout(schedRef.current);
     if (!schedulerOn) { setNextRun(null); return; }
@@ -95,26 +120,21 @@ export default function HealthspanAgent() {
     for (const phase of DEEP_HEALTH_PHASES) {
       addLog(`🔍 Searching: ${phase.label} Health...`, "info");
       try {
-        const res = await fetch("/api/claude", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 4000,
-            tools: [{ type: "web_search_20250305", name: "web_search" }],
-            system: `You are a health content researcher for a Healthspan project on Deep Health.
-Find 3 recent, credible trending articles or studies about the given health domain.
-Respond ONLY with valid JSON — no markdown, no backticks, no preamble.
-Format exactly:
-{"phase":"string","trends":[{"headline":"string","summary":["bullet 1","bullet 2","bullet 3"],"url":"string","source":"string"}]}`,
-            messages: [{ role: "user", content: `Find 3 recent trending articles about "${phase.label} Health" for healthspan/longevity. Focus: ${phase.description}. Return JSON only.` }],
-          }),
+        const d = await callClaude({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 5000,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          system: `You are a health researcher. Find 3 recent articles on the topic given.
+After searching, output ONLY a raw JSON object — no markdown fences, no explanation, nothing else.
+Keep all text brief. Use this exact structure:
+{"trends":[{"headline":"short title","summary":["point 1","point 2"],"url":"https://...","source":"Site Name"},{"headline":"short title","summary":["point 1","point 2"],"url":"https://...","source":"Site Name"},{"headline":"short title","summary":["point 1","point 2"],"url":"https://...","source":"Site Name"}]}`,
+          messages: [{ role: "user", content: `Search for 3 recent articles about "${phase.label} Health" for longevity. Brief summaries. Raw JSON only.` }],
         });
-        const d = await res.json();
         const text = d.content?.find((b) => b.type === "text")?.text || "";
-        const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+        const parsed = extractJSON(text);
+        if (!parsed.trends) parsed.trends = [];
         allResults.push({ phase, data: parsed });
-        addLog(`✅ ${parsed.trends?.length || 0} trends found — ${phase.label}`, "success");
+        addLog(`✅ ${parsed.trends.length} trends found — ${phase.label}`, "success");
       } catch (err) {
         addLog(`⚠️ Skipped ${phase.label}: ${err.message}`, "warn");
       }
@@ -146,24 +166,19 @@ Format exactly:
     <div style="font-size:12px;color:#666;">LinkedIn Content Brief · Week of ${weekLabel}</div>
     <div style="margin-top:8px;display:inline-block;background:${phase.accent};color:white;font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;">🏷️ ${phase.gmailLabel}</div>
   </div>
-  <p style="color:#555;font-size:13px;margin-bottom:18px;">Top trending insights for your <strong>${phase.label} Health</strong> LinkedIn post this week. Pick an angle and write your content.</p>
+  <p style="color:#555;font-size:13px;margin-bottom:18px;">Top trending insights for your <strong>${phase.label} Health</strong> LinkedIn post this week.</p>
   ${trendsHtml}
   <hr style="border:none;border-top:1px solid #eee;margin:24px 0 14px;"/>
-  <p style="font-size:11px;color:#bbb;text-align:center;">Healthspan Deep Health Agent · Auto-generated Sunday briefing · ${phase.gmailLabel}</p>
+  <p style="font-size:11px;color:#bbb;text-align:center;">Healthspan Deep Health Agent · ${phase.gmailLabel}</p>
 </div>`;
 
-        const gr = await fetch("/api/claude", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
-            mcp_servers: [{ type: "url", url: "https://gmail.mcp.claude.com/mcp", name: "gmail-mcp" }],
-            system: `You create Gmail drafts and apply labels. Create the draft, then apply the label "${phase.gmailLabel}" (create label if it doesn't exist). Confirm when done.`,
-            messages: [{ role: "user", content: `Create a Gmail draft:\nTo: ${email}\nSubject: [Healthspan] ${phase.icon} ${phase.label} Health — LinkedIn Brief (${weekLabel})\nBody (HTML): ${emailBody}\n\nThen apply the Gmail label "${phase.gmailLabel}" to this draft.` }],
-          }),
+        const gd = await callClaude({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          mcp_servers: [{ type: "url", url: "https://gmail.mcp.claude.com/mcp", name: "gmail-mcp" }],
+          system: `You create Gmail drafts and apply labels. First create the draft, then apply the label "${phase.gmailLabel}" (create label if needed). Confirm when done.`,
+          messages: [{ role: "user", content: `Create a Gmail draft:\nTo: ${email}\nSubject: [Healthspan] ${phase.icon} ${phase.label} Health — LinkedIn Brief (${weekLabel})\nBody (HTML): ${emailBody}\n\nThen apply Gmail label "${phase.gmailLabel}".` }],
         });
-        const gd = await gr.json();
         const gt = gd.content?.find((b) => b.type === "text")?.text || "";
         if (gt.toLowerCase().includes("draft") || gt.toLowerCase().includes("creat") || gt.toLowerCase().includes("label")) {
           created++;
@@ -184,19 +199,15 @@ Format exactly:
 
   const reset = () => { setStatus(STATUS.IDLE); setLog([]); setResults([]); setDraftsSent(0); setActiveTab("setup"); };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg,#f0fdf4 0%,#ecfeff 60%,#f0f4ff 100%)", fontFamily: "Georgia,serif", padding: "28px 16px 48px" }}>
       <div style={{ maxWidth: 680, margin: "0 auto" }}>
-
-        {/* Header */}
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ fontSize: 42, marginBottom: 8 }}>🌿</div>
           <h1 style={{ fontSize: 25, fontWeight: 700, color: "#1a3a2a", margin: "0 0 6px", letterSpacing: "-0.5px" }}>Healthspan Content Agent</h1>
           <p style={{ color: "#4a7060", fontSize: 14, margin: 0 }}>Researches all 6 Deep Health pillars every Sunday &amp; sends tagged Gmail drafts</p>
         </div>
 
-        {/* Label chips */}
         <div style={{ background: "white", borderRadius: 14, padding: "14px 20px", marginBottom: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: "1px solid #e0f0e8" }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: "#6a6a6a", marginBottom: 9, textTransform: "uppercase", letterSpacing: "0.5px" }}>📌 Gmail Labels — auto-created per pillar</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
@@ -208,7 +219,6 @@ Format exactly:
           </div>
         </div>
 
-        {/* Tabs */}
         <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
           {[["setup","⚙️ Setup"],["log","📟 Log"],["results","📋 Briefs"]].map(([id, label]) => (
             <button key={id} onClick={() => setActiveTab(id)} style={{
@@ -220,18 +230,14 @@ Format exactly:
           ))}
         </div>
 
-        {/* ── SETUP ── */}
         {activeTab === "setup" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-
-            {/* Email input */}
             <div style={{ background: "white", borderRadius: 14, padding: "18px 22px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: "1px solid #e0f0e8" }}>
               <label style={{ fontSize: 13, fontWeight: 700, color: "#2e5e40", display: "block", marginBottom: 7 }}>📬 Recipient Email</label>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" disabled={isRunning}
                 style={{ width: "100%", padding: "10px 13px", borderRadius: 8, border: "1.5px solid #c8e6c9", fontSize: 14, outline: "none", boxSizing: "border-box", color: "#1a3a2a", background: isRunning ? "#f5f5f5" : "white" }} />
             </div>
 
-            {/* Scheduler */}
             <div style={{ background: "white", borderRadius: 14, padding: "18px 22px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: "1px solid #e0f0e8" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
                 <div>
@@ -245,14 +251,12 @@ Format exactly:
                   <div style={{ position: "absolute", top: 3, left: schedulerOn ? 24 : 3, width: 19, height: 19, borderRadius: "50%", background: "white", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.2)" }} />
                 </div>
               </div>
-
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <label style={{ fontSize: 13, color: "#555", whiteSpace: "nowrap" }}>Run at:</label>
                 <input type="time" value={scheduleTime} onChange={(e) => setScheduleTime(e.target.value)} disabled={isRunning}
                   style={{ padding: "8px 12px", borderRadius: 8, border: "1.5px solid #c8e6c9", fontSize: 14, color: "#1a3a2a", outline: "none", background: isRunning ? "#f5f5f5" : "white" }} />
                 <span style={{ fontSize: 12, color: "#888" }}>(your local time)</span>
               </div>
-
               {schedulerOn && nextRun && (
                 <div style={{ marginTop: 13, background: "#f0fdf4", borderRadius: 8, padding: "10px 14px", border: "1px solid #a5d6a7", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                   <div>
@@ -267,16 +271,13 @@ Format exactly:
               {!schedulerOn && <div style={{ marginTop: 11, fontSize: 12, color: "#bbb", fontStyle: "italic" }}>Scheduler off — toggle to auto-run every Sunday</div>}
             </div>
 
-            {/* Run / Done */}
             {status !== STATUS.DONE ? (
               <button onClick={runAgent} disabled={isRunning} style={{
                 width: "100%", padding: "15px", borderRadius: 12, border: "none",
                 background: isRunning ? "#ccc" : "linear-gradient(135deg,#2E7D32,#006064)",
                 color: "white", fontSize: 15, fontWeight: 700, cursor: isRunning ? "not-allowed" : "pointer",
               }}>
-                {isRunning
-                  ? (status === STATUS.SEARCHING ? "🔍 Searching all 6 pillars..." : "📧 Creating Gmail drafts...")
-                  : "▶ Run Now — All 6 Pillars"}
+                {isRunning ? (status === STATUS.SEARCHING ? "🔍 Searching all 6 pillars..." : "📧 Creating Gmail drafts...") : "▶ Run Now — All 6 Pillars"}
               </button>
             ) : (
               <div style={{ background: "linear-gradient(135deg,#e8f5e9,#e0f7fa)", border: "1.5px solid #81c784", borderRadius: 12, padding: "20px 24px", textAlign: "center" }}>
@@ -289,26 +290,19 @@ Format exactly:
           </div>
         )}
 
-        {/* ── LOG ── */}
         {activeTab === "log" && (
           <div style={{ background: "#0f1f0f", borderRadius: 14, padding: "18px 20px", minHeight: 220, boxShadow: "0 2px 10px rgba(0,0,0,0.1)" }}>
             <div style={{ fontSize: 11, color: "#6fcf7f", fontWeight: 700, marginBottom: 10, fontFamily: "monospace", letterSpacing: "1px" }}>● AGENT LOG</div>
             {log.length === 0 && <div style={{ color: "#4a6a4a", fontSize: 13, fontFamily: "monospace" }}>No activity yet.</div>}
             {log.map((e, i) => (
-              <div key={i} style={{
-                fontFamily: "monospace", fontSize: 12, marginBottom: 5, lineHeight: 1.5,
-                color: e.type === "error" ? "#ff6b6b" : e.type === "success" ? "#6fcf7f" : e.type === "warn" ? "#ffd166" : "#9ecfa8",
-              }}>{e.msg}</div>
+              <div key={i} style={{ fontFamily: "monospace", fontSize: 12, marginBottom: 5, lineHeight: 1.5, color: e.type === "error" ? "#ff6b6b" : e.type === "success" ? "#6fcf7f" : e.type === "warn" ? "#ffd166" : "#9ecfa8" }}>{e.msg}</div>
             ))}
           </div>
         )}
 
-        {/* ── BRIEFS ── */}
         {activeTab === "results" && (
           <div>
-            {results.length === 0 && (
-              <div style={{ background: "white", borderRadius: 14, padding: "32px", textAlign: "center", color: "#aaa", fontSize: 14 }}>No results yet — run the agent first.</div>
-            )}
+            {results.length === 0 && <div style={{ background: "white", borderRadius: 14, padding: "32px", textAlign: "center", color: "#aaa", fontSize: 14 }}>No results yet — run the agent first.</div>}
             {results.map(({ phase, data }) => (
               <div key={phase.id} style={{ background: "white", borderRadius: 12, padding: "18px 20px", marginBottom: 14, borderLeft: `4px solid ${phase.accent}`, boxShadow: "0 2px 8px rgba(0,0,0,0.05)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -320,15 +314,9 @@ Format exactly:
                     <div style={{ fontWeight: 600, color: "#222", fontSize: 13, marginBottom: 3 }}>{i + 1}. {trend.headline}</div>
                     <div style={{ fontSize: 11, color: "#888", marginBottom: 5 }}>{trend.source}</div>
                     <ul style={{ margin: "0 0 5px", paddingLeft: 18 }}>
-                      {(trend.summary || []).map((s, j) => (
-                        <li key={j} style={{ fontSize: 12, color: "#444", marginBottom: 2 }}>{s}</li>
-                      ))}
+                      {(trend.summary || []).map((s, j) => <li key={j} style={{ fontSize: 12, color: "#444", marginBottom: 2 }}>{s}</li>)}
                     </ul>
-                    {trend.url && (
-                      <a href={trend.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: phase.accent, textDecoration: "none" }}>
-                        🔗 {trend.url.length > 65 ? trend.url.slice(0, 65) + "…" : trend.url}
-                      </a>
-                    )}
+                    {trend.url && <a href={trend.url} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: phase.accent, textDecoration: "none" }}>🔗 {trend.url.length > 65 ? trend.url.slice(0, 65) + "…" : trend.url}</a>}
                   </div>
                 ))}
               </div>
