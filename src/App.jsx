@@ -49,21 +49,35 @@ async function callClaude(payload) {
   return res.json();
 }
 
-function extractJSON(text) {
-  const clean = text.replace(/```json|```/g, "").trim();
-  // Try direct parse first
-  try { return JSON.parse(clean); } catch {}
-  // Try finding JSON object
+// Two-step approach: search first, then format as JSON separately
+async function searchAndFormat(phase) {
+  // Step 1: plain search, no JSON requirement
+  const searchResult = await callClaude({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 3000,
+    tools: [{ type: "web_search_20250305", name: "web_search" }],
+    system: `You are a health researcher. Search for 3 recent articles about the given topic and summarise each one briefly in plain text. For each article include: title, source name, URL, and 2 short bullet points.`,
+    messages: [{ role: "user", content: `Find 3 recent articles about "${phase.label} Health" related to longevity and healthspan. Briefly summarise each one.` }],
+  });
+
+  const searchText = searchResult.content?.find((b) => b.type === "text")?.text || "";
+  if (!searchText) throw new Error("No search results");
+
+  // Step 2: convert plain text summary to JSON
+  const jsonResult = await callClaude({
+    model: "claude-sonnet-4-20250514",
+    max_tokens: 2000,
+    system: `Convert the given article summaries into a JSON object. Return ONLY raw JSON, no markdown, no backticks, no explanation.
+Format: {"trends":[{"headline":"title","summary":["point 1","point 2"],"url":"https://...","source":"Name"}]}`,
+    messages: [{ role: "user", content: `Convert these summaries to JSON:\n\n${searchText}` }],
+  });
+
+  const jsonText = jsonResult.content?.find((b) => b.type === "text")?.text || "";
+  const clean = jsonText.replace(/```json|```/g, "").trim();
   const start = clean.indexOf("{");
   const end = clean.lastIndexOf("}");
-  if (start !== -1 && end !== -1) {
-    try { return JSON.parse(clean.slice(start, end + 1)); } catch {}
-  }
-  // Try extracting individual trend objects
-  const matches = [...clean.matchAll(/\{"headline"[^}]+\}/gs)];
-  const objects = matches.map(m => { try { return JSON.parse(m[0]); } catch { return null; } }).filter(Boolean);
-  if (objects.length > 0) return { trends: objects };
-  throw new Error("Could not parse JSON");
+  if (start === -1 || end === -1) throw new Error(`No JSON found. Got: ${clean.slice(0, 100)}`);
+  return JSON.parse(clean.slice(start, end + 1));
 }
 
 export default function HealthspanAgent() {
@@ -120,18 +134,7 @@ export default function HealthspanAgent() {
     for (const phase of DEEP_HEALTH_PHASES) {
       addLog(`🔍 Searching: ${phase.label} Health...`, "info");
       try {
-        const d = await callClaude({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 5000,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          system: `You are a health researcher. Find 3 recent articles on the topic given.
-After searching, output ONLY a raw JSON object — no markdown fences, no explanation, nothing else.
-Keep all text brief. Use this exact structure:
-{"trends":[{"headline":"short title","summary":["point 1","point 2"],"url":"https://...","source":"Site Name"},{"headline":"short title","summary":["point 1","point 2"],"url":"https://...","source":"Site Name"},{"headline":"short title","summary":["point 1","point 2"],"url":"https://...","source":"Site Name"}]}`,
-          messages: [{ role: "user", content: `Search for 3 recent articles about "${phase.label} Health" for longevity. Brief summaries. Raw JSON only.` }],
-        });
-        const text = d.content?.find((b) => b.type === "text")?.text || "";
-        const parsed = extractJSON(text);
+        const parsed = await searchAndFormat(phase);
         if (!parsed.trends) parsed.trends = [];
         allResults.push({ phase, data: parsed });
         addLog(`✅ ${parsed.trends.length} trends found — ${phase.label}`, "success");
