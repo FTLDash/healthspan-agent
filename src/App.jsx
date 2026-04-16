@@ -152,35 +152,32 @@ export default function HealthspanAgent() {
 
     for (const { phase, data } of allResults) {
       try {
-        const trendsHtml = (data.trends || []).map((t, i) => `
-<div style="margin-bottom:16px;padding:12px 16px;background:#fafafa;border-left:4px solid ${phase.accent};border-radius:6px;">
-  <strong style="font-size:14px;color:#111;">${i + 1}. ${t.headline}</strong><br/>
-  <span style="color:#888;font-size:11px;">📰 ${t.source}</span>
-  <ul style="margin:8px 0 6px;padding-left:18px;">
-    ${(t.summary || []).map((s) => `<li style="font-size:13px;color:#333;margin-bottom:3px;">${s}</li>`).join("")}
-  </ul>
-  <a href="${t.url}" style="font-size:12px;color:${phase.accent};text-decoration:none;">🔗 Read full article →</a>
-</div>`).join("");
+        // Build plain text email body — much more reliable than HTML for Gmail MCP
+        const trendsText = (data.trends || []).map((t, i) => {
+          const bullets = (t.summary || []).map(s => `  • ${s}`).join("\n");
+          return `${i + 1}. ${t.headline}\n   Source: ${t.source}\n${bullets}\n   Link: ${t.url}`;
+        }).join("\n\n");
 
-        const emailBody = `<div style="font-family:Georgia,serif;max-width:620px;margin:0 auto;color:#222;padding:24px;">
-  <div style="background:${phase.color};border-radius:12px;padding:20px 24px;margin-bottom:22px;">
-    <div style="font-size:30px;margin-bottom:4px;">${phase.icon}</div>
-    <h2 style="margin:0 0 4px;color:${phase.accent};font-size:19px;">${phase.label} Health</h2>
-    <div style="font-size:12px;color:#666;">LinkedIn Content Brief · Week of ${weekLabel}</div>
-    <div style="margin-top:8px;display:inline-block;background:${phase.accent};color:white;font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;">🏷️ ${phase.gmailLabel}</div>
-  </div>
-  <p style="color:#555;font-size:13px;margin-bottom:18px;">Top trending insights for your <strong>${phase.label} Health</strong> LinkedIn post this week.</p>
-  ${trendsHtml}
-  <hr style="border:none;border-top:1px solid #eee;margin:24px 0 14px;"/>
-  <p style="font-size:11px;color:#bbb;text-align:center;">Healthspan Deep Health Agent · ${phase.gmailLabel}</p>
-</div>`;
+        const emailBody = `${phase.icon} ${phase.label} Health — LinkedIn Content Brief
+Week of ${weekLabel}
+Label: ${phase.gmailLabel}
+${"=".repeat(50)}
+
+Top trending insights for your ${phase.label} Health LinkedIn post this week:
+
+${trendsText}
+
+---
+Healthspan Deep Health Agent`;
+
+        const subject = `[Healthspan] ${phase.label} Health — LinkedIn Content Brief (${weekLabel})`;
 
         const gd = await callClaude({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1000,
           mcp_servers: [{ type: "url", url: "https://gmail.mcp.claude.com/mcp", name: "gmail-mcp" }],
-          system: `You create Gmail drafts and apply labels. First create the draft, then apply the label "${phase.gmailLabel}" (create label if needed). Confirm when done.`,
-          messages: [{ role: "user", content: `Create a Gmail draft:\nTo: ${email}\nSubject: [Healthspan] ${phase.icon} ${phase.label} Health — LinkedIn Brief (${weekLabel})\nBody (HTML): ${emailBody}\n\nThen apply Gmail label "${phase.gmailLabel}".` }],
+          system: `You are a Gmail assistant. When asked, use your Gmail tools to: 1) create a draft email, 2) apply a label to it. Always do both steps. Confirm when complete.`,
+          messages: [{ role: "user", content: `Please do two things:\n\n1. Create a Gmail draft with:\n   To: ${email}\n   Subject: ${subject}\n   Body: ${emailBody}\n\n2. Apply the Gmail label "${phase.gmailLabel}" to that draft (create the label first if it doesn't exist).\n\nConfirm when both are done.` }],
         });
         const gt = gd.content?.find((b) => b.type === "text")?.text || "";
         if (gt.toLowerCase().includes("draft") || gt.toLowerCase().includes("creat") || gt.toLowerCase().includes("label")) {
