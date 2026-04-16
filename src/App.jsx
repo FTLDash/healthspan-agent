@@ -101,8 +101,11 @@ export default function HealthspanAgent() {
     const allResults = [];
     const weekLabel = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
     for (const phase of DEEP_HEALTH_PHASES) {
       addLog(`🔍 Generating brief: ${phase.label} Health...`, "info");
+      await sleep(2000);
       try {
         const d = await callClaude({
           model: "claude-sonnet-4-20250514",
