@@ -95,7 +95,7 @@ export default function HealthspanAgent() {
     for (const phase of DEEP_HEALTH_PHASES) {
       addLog(`🔍 Searching: ${phase.label} Health...`, "info");
       try {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
+        const res = await fetch("/api/claude", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -152,7 +152,7 @@ Format exactly:
   <p style="font-size:11px;color:#bbb;text-align:center;">Healthspan Deep Health Agent · Auto-generated Sunday briefing · ${phase.gmailLabel}</p>
 </div>`;
 
-        const gr = await fetch("https://api.anthropic.com/v1/messages", {
+        const gr = await fetch("/api/claude", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
