@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from "react";
 
 const DEEP_HEALTH_PHASES = [
-  { id: "physical",      label: "Physical",      icon: "⚡", color: "#E8F5E9", accent: "#2E7D32", description: "Body composition, movement, sleep, nutrition",        gmailLabel: "Healthspan/Physical"      },
-  { id: "mental",        label: "Mental",        icon: "🧠", color: "#E3F2FD", accent: "#1565C0", description: "Cognitive health, clarity, neuroplasticity",          gmailLabel: "Healthspan/Mental"        },
-  { id: "emotional",     label: "Emotional",     icon: "💚", color: "#FCE4EC", accent: "#880E4F", description: "Emotional regulation, resilience, wellbeing",         gmailLabel: "Healthspan/Emotional"     },
-  { id: "existential",   label: "Existential",   icon: "✨", color: "#F3E5F5", accent: "#6A1B9A", description: "Purpose, meaning, values, identity",                  gmailLabel: "Healthspan/Existential"   },
-  { id: "relational",    label: "Relational",    icon: "🤝", color: "#FFF8E1", accent: "#E65100", description: "Social connection, relationships, community",         gmailLabel: "Healthspan/Relational"    },
-  { id: "environmental", label: "Environmental", icon: "🌿", color: "#E0F7FA", accent: "#006064", description: "Surroundings, nature, built environment",             gmailLabel: "Healthspan/Environmental" },
+  { id: "physical",      label: "Physical",      icon: "⚡", color: "#E8F5E9", accent: "#2E7D32", description: "exercise, sleep, nutrition, body composition",      gmailLabel: "Healthspan/Physical"      },
+  { id: "mental",        label: "Mental",        icon: "🧠", color: "#E3F2FD", accent: "#1565C0", description: "cognitive health, brain training, neuroplasticity",  gmailLabel: "Healthspan/Mental"        },
+  { id: "emotional",     label: "Emotional",     icon: "💚", color: "#FCE4EC", accent: "#880E4F", description: "emotional regulation, resilience, stress management", gmailLabel: "Healthspan/Emotional"     },
+  { id: "existential",   label: "Existential",   icon: "✨", color: "#F3E5F5", accent: "#6A1B9A", description: "purpose, meaning, values, identity, life direction",  gmailLabel: "Healthspan/Existential"   },
+  { id: "relational",    label: "Relational",    icon: "🤝", color: "#FFF8E1", accent: "#E65100", description: "social connection, relationships, community",        gmailLabel: "Healthspan/Relational"    },
+  { id: "environmental", label: "Environmental", icon: "🌿", color: "#E0F7FA", accent: "#006064", description: "surroundings, nature, built environment, light",     gmailLabel: "Healthspan/Environmental" },
 ];
 
 const STATUS = { IDLE: "idle", SEARCHING: "searching", DRAFTING: "drafting", DONE: "done" };
@@ -47,37 +47,6 @@ async function callClaude(payload) {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
-}
-
-// Two-step approach: search first, then format as JSON separately
-async function searchAndFormat(phase) {
-  // Step 1: plain search, no JSON requirement
-  const searchResult = await callClaude({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 3000,
-    tools: [{ type: "web_search_20250305", name: "web_search" }],
-    system: `You are a health researcher. Search for 3 recent articles about the given topic and summarise each one briefly in plain text. For each article include: title, source name, URL, and 2 short bullet points.`,
-    messages: [{ role: "user", content: `Find 3 recent articles about "${phase.label} Health" related to longevity and healthspan. Briefly summarise each one.` }],
-  });
-
-  const searchText = searchResult.content?.find((b) => b.type === "text")?.text || "";
-  if (!searchText) throw new Error("No search results");
-
-  // Step 2: convert plain text summary to JSON
-  const jsonResult = await callClaude({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 2000,
-    system: `Convert the given article summaries into a JSON object. Return ONLY raw JSON, no markdown, no backticks, no explanation.
-Format: {"trends":[{"headline":"title","summary":["point 1","point 2"],"url":"https://...","source":"Name"}]}`,
-    messages: [{ role: "user", content: `Convert these summaries to JSON:\n\n${searchText}` }],
-  });
-
-  const jsonText = jsonResult.content?.find((b) => b.type === "text")?.text || "";
-  const clean = jsonText.replace(/```json|```/g, "").trim();
-  const start = clean.indexOf("{");
-  const end = clean.lastIndexOf("}");
-  if (start === -1 || end === -1) throw new Error(`No JSON found. Got: ${clean.slice(0, 100)}`);
-  return JSON.parse(clean.slice(start, end + 1));
 }
 
 export default function HealthspanAgent() {
@@ -130,14 +99,26 @@ export default function HealthspanAgent() {
     setActiveTab("log");
 
     const allResults = [];
+    const weekLabel = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
     for (const phase of DEEP_HEALTH_PHASES) {
-      addLog(`🔍 Searching: ${phase.label} Health...`, "info");
+      addLog(`🔍 Generating brief: ${phase.label} Health...`, "info");
       try {
-        const parsed = await searchAndFormat(phase);
-        if (!parsed.trends) parsed.trends = [];
+        const d = await callClaude({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1000,
+          system: `You are a health content researcher for a Healthspan project. Generate 3 insightful content ideas about the given health topic for LinkedIn posts aimed at people interested in longevity and deep health. Return ONLY a raw JSON object with no markdown, no backticks, no explanation. Use this exact format: {"trends":[{"headline":"string","summary":["point 1","point 2"],"url":"https://pubmed.ncbi.nlm.nih.gov/","source":"string"},{"headline":"string","summary":["point 1","point 2"],"url":"https://pubmed.ncbi.nlm.nih.gov/","source":"string"},{"headline":"string","summary":["point 1","point 2"],"url":"https://pubmed.ncbi.nlm.nih.gov/","source":"string"}]}`,
+          messages: [{ role: "user", content: `Generate 3 LinkedIn content ideas about "${phase.label} Health" covering: ${phase.description}. Focus on practical insights for healthspan and longevity. Return JSON only.` }],
+        });
+        const text = d.content?.find((b) => b.type === "text")?.text || "";
+        const clean = text.replace(/```json|```/g, "").trim();
+        const start = clean.indexOf("{");
+        const end = clean.lastIndexOf("}");
+        if (start === -1 || end === -1) throw new Error("No JSON in response");
+        const parsed = JSON.parse(clean.slice(start, end + 1));
+        if (!parsed.trends) throw new Error("Invalid format");
         allResults.push({ phase, data: parsed });
-        addLog(`✅ ${parsed.trends.length} trends found — ${phase.label}`, "success");
+        addLog(`✅ ${parsed.trends.length} ideas generated — ${phase.label}`, "success");
       } catch (err) {
         addLog(`⚠️ Skipped ${phase.label}: ${err.message}`, "warn");
       }
@@ -145,46 +126,33 @@ export default function HealthspanAgent() {
 
     setResults(allResults);
     setStatus(STATUS.DRAFTING);
-    addLog("📧 Creating tagged Gmail drafts...", "info");
+    addLog("📧 Creating Gmail drafts...", "info");
 
     let created = 0;
-    const weekLabel = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
     for (const { phase, data } of allResults) {
       try {
-        // Build plain text email body — much more reliable than HTML for Gmail MCP
         const trendsText = (data.trends || []).map((t, i) => {
           const bullets = (t.summary || []).map(s => `  • ${s}`).join("\n");
-          return `${i + 1}. ${t.headline}\n   Source: ${t.source}\n${bullets}\n   Link: ${t.url}`;
+          return `${i + 1}. ${t.headline}\n   Source: ${t.source}\n${bullets}\n   Reference: ${t.url}`;
         }).join("\n\n");
 
-        const emailBody = `${phase.icon} ${phase.label} Health — LinkedIn Content Brief
-Week of ${weekLabel}
-Label: ${phase.gmailLabel}
-${"=".repeat(50)}
-
-Top trending insights for your ${phase.label} Health LinkedIn post this week:
-
-${trendsText}
-
----
-Healthspan Deep Health Agent`;
-
-        const subject = `[Healthspan] ${phase.label} Health — LinkedIn Content Brief (${weekLabel})`;
+        const subject = `[Healthspan] ${phase.icon} ${phase.label} Health — LinkedIn Content Brief (${weekLabel})`;
+        const body = `${phase.icon} ${phase.label} Health — LinkedIn Content Brief\nWeek of ${weekLabel}\n${"─".repeat(48)}\n\n${trendsText}\n\n${"─".repeat(48)}\nHealthspan Deep Health Agent · ${phase.gmailLabel}`;
 
         const gd = await callClaude({
           model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
+          max_tokens: 500,
           mcp_servers: [{ type: "url", url: "https://gmail.mcp.claude.com/mcp", name: "gmail-mcp" }],
-          system: `You are a Gmail assistant. When asked, use your Gmail tools to: 1) create a draft email, 2) apply a label to it. Always do both steps. Confirm when complete.`,
-          messages: [{ role: "user", content: `Please do two things:\n\n1. Create a Gmail draft with:\n   To: ${email}\n   Subject: ${subject}\n   Body: ${emailBody}\n\n2. Apply the Gmail label "${phase.gmailLabel}" to that draft (create the label first if it doesn't exist).\n\nConfirm when both are done.` }],
+          system: `You are a Gmail assistant. Use Gmail tools to create draft emails and apply labels.`,
+          messages: [{ role: "user", content: `Create a Gmail draft:\nTo: ${email}\nSubject: ${subject}\nBody:\n${body}\n\nThen apply the Gmail label "${phase.gmailLabel}" to the draft. Create the label if it does not exist.` }],
         });
         const gt = gd.content?.find((b) => b.type === "text")?.text || "";
         if (gt.toLowerCase().includes("draft") || gt.toLowerCase().includes("creat") || gt.toLowerCase().includes("label")) {
           created++;
-          addLog(`📬 Draft + label saved: ${phase.gmailLabel}`, "success");
+          addLog(`📬 Draft saved: ${phase.gmailLabel}`, "success");
         } else {
-          addLog(`⚠️ Verify manually in Gmail: ${phase.label}`, "warn");
+          addLog(`⚠️ Check Gmail manually: ${phase.label}`, "warn");
         }
       } catch (err) {
         addLog(`❌ Gmail error (${phase.label}): ${err.message}`, "error");
@@ -193,7 +161,7 @@ Healthspan Deep Health Agent`;
 
     setDraftsSent(created);
     setStatus(STATUS.DONE);
-    addLog(`🎉 Done! ${created}/6 drafts created with Gmail labels.`, "success");
+    addLog(`🎉 Done! ${created}/6 drafts saved to Gmail.`, "success");
     if (created > 0) setActiveTab("results");
   };
 
@@ -205,7 +173,7 @@ Healthspan Deep Health Agent`;
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ fontSize: 42, marginBottom: 8 }}>🌿</div>
           <h1 style={{ fontSize: 25, fontWeight: 700, color: "#1a3a2a", margin: "0 0 6px", letterSpacing: "-0.5px" }}>Healthspan Content Agent</h1>
-          <p style={{ color: "#4a7060", fontSize: 14, margin: 0 }}>Researches all 6 Deep Health pillars every Sunday &amp; sends tagged Gmail drafts</p>
+          <p style={{ color: "#4a7060", fontSize: 14, margin: 0 }}>Generates content briefs for all 6 Deep Health pillars &amp; sends to Gmail</p>
         </div>
 
         <div style={{ background: "white", borderRadius: 14, padding: "14px 20px", marginBottom: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: "1px solid #e0f0e8" }}>
@@ -277,7 +245,7 @@ Healthspan Deep Health Agent`;
                 background: isRunning ? "#ccc" : "linear-gradient(135deg,#2E7D32,#006064)",
                 color: "white", fontSize: 15, fontWeight: 700, cursor: isRunning ? "not-allowed" : "pointer",
               }}>
-                {isRunning ? (status === STATUS.SEARCHING ? "🔍 Searching all 6 pillars..." : "📧 Creating Gmail drafts...") : "▶ Run Now — All 6 Pillars"}
+                {isRunning ? (status === STATUS.SEARCHING ? "✍️ Generating briefs..." : "📧 Creating Gmail drafts...") : "▶ Run Now — All 6 Pillars"}
               </button>
             ) : (
               <div style={{ background: "linear-gradient(135deg,#e8f5e9,#e0f7fa)", border: "1.5px solid #81c784", borderRadius: 12, padding: "20px 24px", textAlign: "center" }}>
