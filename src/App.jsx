@@ -108,16 +108,16 @@ export default function HealthspanAgent() {
       await sleep(2000);
       try {
         const d = await callClaude({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: `You are a health content researcher for a Healthspan project. Generate 3 insightful content ideas about the given health topic for LinkedIn posts aimed at people interested in longevity and deep health. Return ONLY a raw JSON object with no markdown, no backticks, no explanation. Use this exact format: {"trends":[{"headline":"string","summary":["point 1","point 2"],"url":"https://pubmed.ncbi.nlm.nih.gov/","source":"string"},{"headline":"string","summary":["point 1","point 2"],"url":"https://pubmed.ncbi.nlm.nih.gov/","source":"string"},{"headline":"string","summary":["point 1","point 2"],"url":"https://pubmed.ncbi.nlm.nih.gov/","source":"string"}]}`,
-          messages: [{ role: "user", content: `Generate 3 LinkedIn content ideas about "${phase.label} Health" covering: ${phase.description}. Focus on practical insights for healthspan and longevity. Return JSON only.` }],
+          model: "claude-haiku-4-5-20251001",
+          max_tokens: 600,
+          system: `Return ONLY a JSON object, no other text. Format: {"trends":[{"headline":"title","summary":["point 1","point 2"],"url":"https://pubmed.ncbi.nlm.nih.gov/","source":"source name"},{"headline":"title","summary":["point 1","point 2"],"url":"https://pubmed.ncbi.nlm.nih.gov/","source":"source name"},{"headline":"title","summary":["point 1","point 2"],"url":"https://pubmed.ncbi.nlm.nih.gov/","source":"source name"}]}`,
+          messages: [{ role: "user", content: `3 LinkedIn content ideas about "${phase.label} Health" for longevity. JSON only.` }],
         });
         const text = d.content?.find((b) => b.type === "text")?.text || "";
         const clean = text.replace(/```json|```/g, "").trim();
         const start = clean.indexOf("{");
         const end = clean.lastIndexOf("}");
-        if (start === -1 || end === -1) throw new Error("No JSON in response");
+        if (start === -1 || end === -1) throw new Error(`No JSON. Got: ${clean.slice(0,50)}`);
         const parsed = JSON.parse(clean.slice(start, end + 1));
         if (!parsed.trends) throw new Error("Invalid format");
         allResults.push({ phase, data: parsed });
