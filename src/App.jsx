@@ -100,7 +100,7 @@ export default function HealthspanAgent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model: "claude-sonnet-4-20250514",
-            max_tokens: 1000,
+            max_tokens: 4000,
             tools: [{ type: "web_search_20250305", name: "web_search" }],
             system: `You are a health content researcher for a Healthspan project on Deep Health.
 Find 3 recent, credible trending articles or studies about the given health domain.
