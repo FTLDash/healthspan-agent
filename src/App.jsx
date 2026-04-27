@@ -40,7 +40,7 @@ function formatCountdown(ms) {
 }
 
 async function callClaude(payload) {
-  const res = await fetch("/api/claude", {
+  const res = await fetch("https://broken-sound-7883.james-f25.workers.dev", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -300,4 +300,3 @@ export default function HealthspanAgent() {
     </div>
   );
 }
-
