@@ -49,6 +49,8 @@ async function callClaude(payload) {
   return res.json();
 }
 
+
+
 export default function HealthspanAgent() {
   const [email, setEmail]               = useState("");
   const [scheduleTime, setScheduleTime] = useState("08:00");
@@ -143,19 +145,20 @@ export default function HealthspanAgent() {
         const subject = `[Healthspan] ${phase.icon} ${phase.label} Health — LinkedIn Content Brief (${weekLabel})`;
         const body = `${phase.icon} ${phase.label} Health — LinkedIn Content Brief\nWeek of ${weekLabel}\n${"─".repeat(48)}\n\n${trendsText}\n\n${"─".repeat(48)}\nHealthspan Deep Health Agent · ${phase.gmailLabel}`;
 
+        // Send email content to Worker which will create Gmail draft via Anthropic
         const gd = await callClaude({
-          model: "claude-sonnet-4-20250514",
+          model: "claude-haiku-4-5-20251001",
           max_tokens: 500,
           mcp_servers: [{ type: "url", url: "https://gmail.mcp.claude.com/mcp", name: "gmail-mcp" }],
-          system: `You are a Gmail assistant. Use Gmail tools to create draft emails and apply labels.`,
-          messages: [{ role: "user", content: `Create a Gmail draft:\nTo: ${email}\nSubject: ${subject}\nBody:\n${body}\n\nThen apply the Gmail label "${phase.gmailLabel}" to the draft. Create the label if it does not exist.` }],
+          system: `You are a Gmail assistant. Use your Gmail tools to create a draft email. Create the draft with the exact subject and body provided. Then apply the label to it.`,
+          messages: [{ role: "user", content: `Create a Gmail draft:\nTo: ${email}\nSubject: ${subject}\nBody:\n${body}\n\nThen apply the Gmail label "${phase.gmailLabel}" to the draft. Create the label if it does not exist. Confirm when done.` }],
         });
         const gt = gd.content?.find((b) => b.type === "text")?.text || "";
-        if (gt.toLowerCase().includes("draft") || gt.toLowerCase().includes("creat") || gt.toLowerCase().includes("label")) {
+        if (gt.toLowerCase().includes("draft") || gt.toLowerCase().includes("creat") || gt.toLowerCase().includes("success") || gt.toLowerCase().includes("label")) {
           created++;
           addLog(`📬 Draft saved: ${phase.gmailLabel}`, "success");
         } else {
-          addLog(`⚠️ Check Gmail manually: ${phase.label}`, "warn");
+          addLog(`⚠️ Gmail response: ${gt.slice(0, 100)}`, "warn");
         }
       } catch (err) {
         addLog(`❌ Gmail error (${phase.label}): ${err.message}`, "error");
