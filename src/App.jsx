@@ -130,45 +130,9 @@ export default function HealthspanAgent() {
     }
 
     setResults(allResults);
-    setStatus(STATUS.DRAFTING);
-    addLog("📧 Creating Gmail drafts...", "info");
-
-    let created = 0;
-
-    for (const { phase, data } of allResults) {
-      try {
-        const trendsText = (data.trends || []).map((t, i) => {
-          const bullets = (t.summary || []).map(s => `  • ${s}`).join("\n");
-          return `${i + 1}. ${t.headline}\n   Source: ${t.source}\n${bullets}\n   Reference: ${t.url}`;
-        }).join("\n\n");
-
-        const subject = `[Healthspan] ${phase.icon} ${phase.label} Health — LinkedIn Content Brief (${weekLabel})`;
-        const body = `${phase.icon} ${phase.label} Health — LinkedIn Content Brief\nWeek of ${weekLabel}\n${"─".repeat(48)}\n\n${trendsText}\n\n${"─".repeat(48)}\nHealthspan Deep Health Agent · ${phase.gmailLabel}`;
-
-        // Send email content to Worker which will create Gmail draft via Anthropic
-        const gd = await callClaude({
-          model: "claude-haiku-4-5-20251001",
-          max_tokens: 500,
-          mcp_servers: [{ type: "url", url: "https://gmail.mcp.claude.com/mcp", name: "gmail-mcp" }],
-          system: `You are a Gmail assistant. Use your Gmail tools to create a draft email. Create the draft with the exact subject and body provided. Then apply the label to it.`,
-          messages: [{ role: "user", content: `Create a Gmail draft:\nTo: ${email}\nSubject: ${subject}\nBody:\n${body}\n\nThen apply the Gmail label "${phase.gmailLabel}" to the draft. Create the label if it does not exist. Confirm when done.` }],
-        });
-        const gt = gd.content?.find((b) => b.type === "text")?.text || "";
-        if (gt.toLowerCase().includes("draft") || gt.toLowerCase().includes("creat") || gt.toLowerCase().includes("success") || gt.toLowerCase().includes("label")) {
-          created++;
-          addLog(`📬 Draft saved: ${phase.gmailLabel}`, "success");
-        } else {
-          addLog(`⚠️ Gmail response: ${gt.slice(0, 100)}`, "warn");
-        }
-      } catch (err) {
-        addLog(`❌ Gmail error (${phase.label}): ${err.message}`, "error");
-      }
-    }
-
-    setDraftsSent(created);
     setStatus(STATUS.DONE);
-    addLog(`🎉 Done! ${created}/6 drafts saved to Gmail.`, "success");
-    if (created > 0) setActiveTab("results");
+    addLog(`🎉 All 6 briefs ready — click the Briefs tab to view.`, "success");
+    setActiveTab("results");
   };
 
   const reset = () => { setStatus(STATUS.IDLE); setLog([]); setResults([]); setDraftsSent(0); setActiveTab("setup"); };
@@ -206,11 +170,7 @@ export default function HealthspanAgent() {
 
         {activeTab === "setup" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ background: "white", borderRadius: 14, padding: "18px 22px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: "1px solid #e0f0e8" }}>
-              <label style={{ fontSize: 13, fontWeight: 700, color: "#2e5e40", display: "block", marginBottom: 7 }}>📬 Recipient Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" disabled={isRunning}
-                style={{ width: "100%", padding: "10px 13px", borderRadius: 8, border: "1.5px solid #c8e6c9", fontSize: 14, outline: "none", boxSizing: "border-box", color: "#1a3a2a", background: isRunning ? "#f5f5f5" : "white" }} />
-            </div>
+
 
             <div style={{ background: "white", borderRadius: 14, padding: "18px 22px", boxShadow: "0 2px 8px rgba(0,0,0,0.05)", border: "1px solid #e0f0e8" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -251,13 +211,13 @@ export default function HealthspanAgent() {
                 background: isRunning ? "#ccc" : "linear-gradient(135deg,#2E7D32,#006064)",
                 color: "white", fontSize: 15, fontWeight: 700, cursor: isRunning ? "not-allowed" : "pointer",
               }}>
-                {isRunning ? (status === STATUS.SEARCHING ? "✍️ Generating briefs..." : "📧 Creating Gmail drafts...") : "▶ Run Now — All 6 Pillars"}
+                {isRunning ? (status === STATUS.SEARCHING ? "✍️ Generating briefs...") : "▶ Run Now — All 6 Pillars"}
               </button>
             ) : (
               <div style={{ background: "linear-gradient(135deg,#e8f5e9,#e0f7fa)", border: "1.5px solid #81c784", borderRadius: 12, padding: "20px 24px", textAlign: "center" }}>
                 <div style={{ fontSize: 30, marginBottom: 6 }}>🎉</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#2E7D32", marginBottom: 4 }}>{draftsSent}/6 drafts saved to Gmail!</div>
-                <p style={{ color: "#4a7060", fontSize: 13, margin: "0 0 14px" }}>Check Gmail Drafts — each pillar is tagged under <strong>Healthspan/[Pillar]</strong>.</p>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#2E7D32", marginBottom: 4 }}>All 6 briefs ready!</div>
+                <p style={{ color: "#4a7060", fontSize: 13, margin: "0 0 14px" }}>Click the <strong>📋 Briefs</strong> tab to read and copy your content ideas.</p>
                 <button onClick={reset} style={{ padding: "9px 22px", borderRadius: 8, border: "1.5px solid #2E7D32", background: "white", color: "#2E7D32", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>↺ Reset</button>
               </div>
             )}
